@@ -13,8 +13,8 @@
 #define DIO_TM_PIN 4
 
 // Pinos utilizados pelos botões seletores de endereço
-// #define ENDERECO_PIN_DEZ 22
-// #define ENDERECO_PIN_UN 24
+// #define ENDERECO_PIN_DEZ 33
+// #define ENDERECO_PIN_UN 32
 
 // Constantes utilizadas pelo módulo TM1638
 const bool HIGH_FREQ_TM = true; // Configuração de alta frequência - verdadeiro para Esp
