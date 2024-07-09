@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <TM1638plus.h> // Biblioteca de manipulação do módulo de display
+#include <AsyncTCP.h>
 
 // Pinos utilizados pelo 74HC595 - Leds
 #define LATCH_595_PIN 18
@@ -11,6 +12,9 @@
 #define STROBE_TM_PIN 15
 #define CLOCK_TM_PIN 2
 #define DIO_TM_PIN 4
+
+//Porta TCP do Modbus
+#define MODBUS_PORT 502
 
 // Pinos utilizados pelos botões seletores de endereço
 // #define ENDERECO_PIN_DEZ 33
@@ -29,7 +33,7 @@ const long INTERVALO_ATT_DISPLAY = 1000; // Tempo em ms entre atualizações do 
 TM1638plus tm(STROBE_TM_PIN, CLOCK_TM_PIN , DIO_TM_PIN, HIGH_FREQ_TM); // Objeto usado para controlar o módulo TM1638
 
 // Variáveis Globais
-// byte receivedData[20]; // Salva o quadro Modbus recebido
+byte* receivedData; // Salva o quadro Modbus recebido
 // byte resposta[20]; // Salva o quadro Modbus a ser enviado como resposta
 // bool broadcast;        // Informa se o último quadro recebido foi um broadcast ou não
 uint16_t registradores[8]; // Os valores a serem alterados pelas solicitações Modbus
@@ -37,13 +41,62 @@ uint8_t botoes; // Cada bit representa o estado de um botão do módulo TM1638
 uint8_t reg_exibido_1, reg_exibido_2; // Guarda os registradores sendo exibidos no momento
 // uint8_t endereco_escravo; // Guarda o endereco do escravo, conforme lido pelos botoes
 
-WiFiServer modbus_server(502);
 
 // put function declarations here:
 bool lerBotoes();
 void atualizaDisplay();
 void acendeLeds(uint8_t indice1, uint8_t indice2);
 void atualizaRegistradoresExbidos();
+
+static void handleData(void *arg, AsyncClient *client, void *data, size_t len) {
+  receivedData = (byte *)data;
+	Serial.printf("\n DADOS RECEBIDOS %s \n", client->remoteIP().toString().c_str());
+  for (uint16_t i = 0; i < len; i++){
+    Serial.printf("%02x - ", receivedData[i]);
+  }
+  Serial.println("");
+  
+  // COMANDO MODBUS RECEBIDO EM dados
+
+  //Verificar MBAP -
+    // Protocol ID
+    // Unit ID
+    // Length
+  
+  //Interpretar comando modbus
+    // Verificar Funcao
+    // Executar
+
+	//our big json string test
+	String jsonString = "{\"data_from_module_type\":5,\"hub_unique_id\":\"hub-bfd\",\"slave_unique_id\":\"\",\"water_sensor\":{\"unique_id\":\"water-sensor-ba9\",\"firmware\":\"0.0.1\",\"hub_unique_id\":\"hub-bfd\",\"ip_address\":\"192.168.4.2\",\"mdns\":\"water-sensor-ba9.local\",\"pair_status\":127,\"ec\":{\"value\":0,\"calib_launch\":0,\"sensor_k_origin\":1,\"sensor_k_calibration\":1,\"calibration_solution\":1,\"regulation_state\":1,\"max_pumps_durations\":5000,\"set_point\":200},\"ph\":{\"value\":0,\"calib_launch\":0,\"regulation_state\":1,\"max_pumps_durations\":5000,\"set_point\":700},\"water\":{\"temperature\":0,\"pump_enable\":false}}}";
+	// reply to client
+	if (client->space() > strlen(jsonString.c_str()) && client->canSend())
+	{
+		client->add(jsonString.c_str(), strlen(jsonString.c_str()));
+		client->send();
+	}
+}
+
+static void handleError(void *arg, AsyncClient *client, int8_t error) {
+	Serial.printf("\n Erro %s na conexao do cliente %s \n", client->errorToString(error), client->remoteIP().toString().c_str());
+}
+
+static void handleDisconnect(void *arg, AsyncClient *client) {
+	Serial.printf("\n Cliente %s se desconectou \n", client->remoteIP().toString().c_str());
+}
+
+static void handleTimeOut(void *arg, AsyncClient *client, uint32_t time) {
+	Serial.printf("\n Cliente sofreu Timeout: %s \n", client->remoteIP().toString().c_str());
+}
+
+static void handleNewClient(void *arg, AsyncClient *client) {
+	Serial.printf("\n Cliente conectou ao servidor, ip: %s", client->remoteIP().toString().c_str());
+	// register events
+	client->onData(&handleData, NULL);
+	client->onError(&handleError, NULL);
+	client->onDisconnect(&handleDisconnect, NULL);
+	client->onTimeout(&handleTimeOut, NULL);
+}
 
 
 void setup() {
@@ -103,7 +156,9 @@ void setup() {
   Serial.println("Concetado a rede com o endereço IP:");
   Serial.println(WiFi.localIP());
 
-  modbus_server.begin();
+  AsyncServer *server = new AsyncServer(MODBUS_PORT);
+  server->onClient(&handleNewClient, server);
+	server->begin();
 }
 
 void loop() {
@@ -115,29 +170,7 @@ void loop() {
   }
 
    // Atualiza os dados do display
-  atualizaDisplay();
-
-
-  // // Verifica se há um quadro modbus disponivel
-  // if (quadroModbusDisponivel()) {
-  //   // Quando há um quadro disponível - ler, testar erros e executar
-  //   lerQuadroModbus();
-  // }
-  
-  char leitura[255];
-  WiFiClient cliente = modbus_server.available();
-  if(cliente) {
-    Serial.println("Conexao estabelecida");
-    while(cliente.connected()) {
-      while(cliente.available() > 0) {
-        uint16_t qtd_bytes = cliente.readBytes(leitura, 255);
-        Serial.println("DADOS RECEBIDOS");
-        Serial.write(leitura, 255);
-      }
-    }
-    cliente.stop();
-    Serial.println("FIM DA CONEXAO");
-  }
+  atualizaDisplay();  
 }
 
 
