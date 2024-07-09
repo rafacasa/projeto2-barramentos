@@ -17,8 +17,8 @@
 #define MODBUS_PORT 502
 
 // Pinos utilizados pelos botões seletores de endereço
-// #define ENDERECO_PIN_DEZ 33
-// #define ENDERECO_PIN_UN 32
+#define ENDERECO_PIN_DEZ 33
+#define ENDERECO_PIN_UN 32
 
 // Constantes com as informações de conexao wifi
 const char* SSID = "FamiliaCasa";
@@ -34,12 +34,14 @@ TM1638plus tm(STROBE_TM_PIN, CLOCK_TM_PIN , DIO_TM_PIN, HIGH_FREQ_TM); // Objeto
 
 // Variáveis Globais
 byte* receivedData; // Salva o quadro Modbus recebido
-// byte resposta[20]; // Salva o quadro Modbus a ser enviado como resposta
+uint16_t qtd_bytes_dados_recebidos; // Salva o tamanho do quadro Modbus recebido
+char resposta[100]; // Salva o quadro Modbus a ser enviado como resposta
+uint16_t qtd_bytes_resposta; // Salva o tamanho do quadro Modbus a ser enviado como resposta
 // bool broadcast;        // Informa se o último quadro recebido foi um broadcast ou não
 uint16_t registradores[8]; // Os valores a serem alterados pelas solicitações Modbus
 uint8_t botoes; // Cada bit representa o estado de um botão do módulo TM1638
 uint8_t reg_exibido_1, reg_exibido_2; // Guarda os registradores sendo exibidos no momento
-// uint8_t endereco_escravo; // Guarda o endereco do escravo, conforme lido pelos botoes
+uint8_t endereco_escravo; // Guarda o endereco do escravo, conforme lido pelos botoes
 
 
 // put function declarations here:
@@ -47,9 +49,17 @@ bool lerBotoes();
 void atualizaDisplay();
 void acendeLeds(uint8_t indice1, uint8_t indice2);
 void atualizaRegistradoresExbidos();
+bool checaValidadeModbus();
+bool avaliaComandoModbus();
+uint8_t executaSolicitacao();
+uint8_t executaWriteMultipleRegisters();
+void escreveRegistrador(uint16_t endereco, uint16_t valor);
 
 static void handleData(void *arg, AsyncClient *client, void *data, size_t len) {
+  uint16_t qtd_bytes_para_cabecalho;
+  bool envia_resposta = false;
   receivedData = (byte *)data;
+  qtd_bytes_dados_recebidos = len;
 	Serial.printf("\n DADOS RECEBIDOS %s \n", client->remoteIP().toString().c_str());
   for (uint16_t i = 0; i < len; i++){
     Serial.printf("%02x - ", receivedData[i]);
@@ -62,19 +72,27 @@ static void handleData(void *arg, AsyncClient *client, void *data, size_t len) {
     // Protocol ID
     // Unit ID
     // Length
-  
-  //Interpretar comando modbus
-    // Verificar Funcao
-    // Executar
 
-	//our big json string test
-	String jsonString = "{\"data_from_module_type\":5,\"hub_unique_id\":\"hub-bfd\",\"slave_unique_id\":\"\",\"water_sensor\":{\"unique_id\":\"water-sensor-ba9\",\"firmware\":\"0.0.1\",\"hub_unique_id\":\"hub-bfd\",\"ip_address\":\"192.168.4.2\",\"mdns\":\"water-sensor-ba9.local\",\"pair_status\":127,\"ec\":{\"value\":0,\"calib_launch\":0,\"sensor_k_origin\":1,\"sensor_k_calibration\":1,\"calibration_solution\":1,\"regulation_state\":1,\"max_pumps_durations\":5000,\"set_point\":200},\"ph\":{\"value\":0,\"calib_launch\":0,\"regulation_state\":1,\"max_pumps_durations\":5000,\"set_point\":700},\"water\":{\"temperature\":0,\"pump_enable\":false}}}";
-	// reply to client
-	if (client->space() > strlen(jsonString.c_str()) && client->canSend())
-	{
-		client->add(jsonString.c_str(), strlen(jsonString.c_str()));
-		client->send();
-	}
+  if (checaValidadeModbus()) {
+      //Interpretar comando modbus
+        // Verificar Funcao
+        // Executar
+    envia_resposta = avaliaComandoModbus();
+  }
+  
+	// Envio da resposta
+  if (envia_resposta) {
+    qtd_bytes_para_cabecalho = qtd_bytes_resposta - 6;
+
+    resposta[5] = qtd_bytes_para_cabecalho & 0xff;  // Adicionando o tamanho da resposta no cabecalho
+    resposta[4] = qtd_bytes_para_cabecalho >> 8;
+
+    if (client->space() > qtd_bytes_resposta && client->canSend())
+    {
+      client->add(resposta, qtd_bytes_resposta);
+      client->send();
+    }
+  }
 }
 
 static void handleError(void *arg, AsyncClient *client, int8_t error) {
@@ -113,33 +131,34 @@ void setup() {
   pinMode(CLOCK_595_PIN, OUTPUT);
   pinMode(DATA_595_PIN, OUTPUT);
 
-  // Pinos dos botoes seletores do endereco
-  // pinMode(ENDERECO_PIN_DEZ, INPUT_PULLUP);
-  // pinMode(ENDERECO_PIN_UN, INPUT_PULLUP);
+  //Pinos dos botoes seletores do endereco
+  pinMode(ENDERECO_PIN_DEZ, INPUT_PULLUP);
+  pinMode(ENDERECO_PIN_UN, INPUT_PULLUP);
 
   // Definição do endereço do escravo
   //Obtém os estados dos botões
-  // int unidade_endereco = digitalRead(ENDERECO_PIN_UN);
-  // int dezena_endereco = digitalRead(ENDERECO_PIN_DEZ);
+  int unidade_endereco = digitalRead(ENDERECO_PIN_UN);
+  int dezena_endereco = digitalRead(ENDERECO_PIN_DEZ);
 
   // Verifica o estado dos botões e escreve o valor do endereço
-  // if (dezena_endereco == LOW) {
-  //   if (unidade_endereco == LOW) {
-  //     endereco_escravo = 4;
-  //   } else {
-  //     endereco_escravo = 3;
-  //   }
-  // } else {
-  //   if (unidade_endereco == LOW) {
-  //     endereco_escravo = 2;
-  //   } else {
-  //     endereco_escravo = 1;
-  //   }
-  // }
+  if (dezena_endereco == LOW) {
+    if (unidade_endereco == LOW) {
+      endereco_escravo = 4;
+    } else {
+      endereco_escravo = 3;
+    }
+  } else {
+    if (unidade_endereco == LOW) {
+      endereco_escravo = 2;
+    } else {
+      endereco_escravo = 1;
+    }
+  }
+  Serial.printf("UnitID configurado para %d\n", endereco_escravo);
 
   // Inicializa com 0 os registradores
   for(uint8_t i = 0; i < 8; i++) {
-    registradores[i] = i; // TODO ALTERAR PARA 0
+    registradores[i] = 0;
   }
 
   // Inicializa os registradores exibidos
@@ -239,4 +258,175 @@ void atualizaRegistradoresExbidos() {
     reg_exibido_2 = reg_exibido_1;
     reg_exibido_1 = indice_botao;
   }
+}
+
+// Testar ProtocolID, UnitID e tamanho informado
+bool checaValidadeModbus() {
+  // Testando protocolID
+  if (receivedData[2] == 0x00 && receivedData[3] == 0x00) {
+
+    Serial.println("ProtocolID ok");
+    if (receivedData[6] == endereco_escravo) {
+
+      Serial.println("UnitID ok");
+      uint16_t tamanho_informado = receivedData[4];
+      tamanho_informado <<= 8;
+      tamanho_informado += receivedData[5] & 0xff;
+      if (tamanho_informado == (qtd_bytes_dados_recebidos - 6)) {
+
+        Serial.println("Tamanho informado ok");
+        return true;
+      } else {
+        Serial.println("Erro Tamanho Informado");
+      }
+    } else {
+      Serial.println("Erro UnitID");
+    }
+  } else {
+    Serial.println("Erro ProtocolID");
+  }
+  return false;
+}
+
+bool avaliaComandoModbus() {
+  uint8_t codigoExcessao;
+  // Monta o inicio do cabecalho da resposta
+  resposta[0] = receivedData[0];
+  resposta[1] = receivedData[1];
+  resposta[2] = 0x00;
+  resposta[3] = 0x00;
+  resposta[6] = endereco_escravo;
+
+  qtd_bytes_resposta = 7;
+
+  // Tenta executar a solicitação e obtem o código de excessão caso não foi possível
+  codigoExcessao = executaSolicitacao();
+
+  switch (codigoExcessao) { // Verifica o código retornado pela função executaSolicitacao()
+    case 1:
+      // Enviando exceção funcao não suportada
+      resposta[7] = receivedData[7] | 0x80;
+      resposta[8] = 0x01;
+      qtd_bytes_resposta+=2;
+      return true;
+    case 2:
+      // Enviando exceção endereco invalido
+      resposta[7] = receivedData[7] | 0x80;
+      resposta[8] = 0x02;
+      qtd_bytes_resposta+=2;
+      return true;
+    case 3:
+      // Enviando exceção dados do registrador invalidos
+      resposta[7] = receivedData[7] | 0x80;
+      resposta[8] = 0x03;
+      qtd_bytes_resposta+=2;
+      return true;
+    case 4:
+      // Enviando exceção de valor invalido para o registrador
+      resposta[7] = receivedData[7] | 0x80;
+      resposta[8] = 0x04;
+      qtd_bytes_resposta+=2;
+      return true;
+    case 0:
+      // Executou com sucesso - A resposta foi montada na função
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Executa a solicitação enviada, caso seja possível.
+// Retorna 0 caso a solicitação foi executada com sucesso
+// Retorna o código de excessão caso houve algum erro:
+//  1 - Funcao nao suportada
+//  2 - Endereço inválido
+//  3 - Dados do registrador inválidos
+uint8_t executaSolicitacao() {
+  uint8_t funcao_solicitada = receivedData[7];
+
+  switch (funcao_solicitada) { // Verifica a função solicitada
+    case 0x10: // Write Multiple Registers
+      return executaWriteMultipleRegisters();
+      break;
+    
+    default: // Função não suportada
+      return 1;
+      break;
+  }
+}
+
+// Funcao que executa a funcao modbus 0x10
+uint8_t executaWriteMultipleRegisters() {
+  uint16_t quantidade_registradores, endereco_inicial, valor_informado[8];
+  uint8_t contagem_bytes;
+
+  // Obtêm o campo Quantidade de resgistradores do quadro Modbus recebido
+  quantidade_registradores = receivedData[10]; // MSB
+  quantidade_registradores <<= 8;
+  quantidade_registradores += receivedData[11] & 0xff; // LSB
+
+  // Verifica se a quantidade de resgistradores sendo alterados pela solicitação. Gera a excessão 3.
+  if (quantidade_registradores < 1 || quantidade_registradores > 8) {
+    return 3;
+  }
+
+  // Obtêm o campo Contagem de bytes do quadro Modbus recebido
+  contagem_bytes = receivedData[12];
+
+  // Verifica se a quantidade de bytes informada no quadro Modbus é compativel com a solicitacao
+  // 2 * quantidade de registradores a serem alterados
+  // Gera a excessão 3
+  if (contagem_bytes != quantidade_registradores * 2) {
+    return 3;
+  }
+
+  // Obtêm o campo Endereço do primeiro registrador do quadro Modbus recebido
+  endereco_inicial = receivedData[8]; // MSB
+  endereco_inicial <<= 8;
+  endereco_inicial += receivedData[9] & 0xff; // LSB
+
+  // Verifica se o endereço inicial está entre os endereços disponíveis
+  // Gera a excessão 2
+  if (endereco_inicial < 0x0010 || endereco_inicial > 0x0017) {
+    return 2;
+  }
+
+  // Verifica se todos os endereços de registradoes são disponíveis
+  // Gera a excessão 2
+  if (endereco_inicial + quantidade_registradores > 0x0018) {
+    return 2;
+  }
+
+  // Checa se os valores a serem escritos estão entre 0 e 1023 - Excessao 4
+  for (uint8_t i = 0; i < quantidade_registradores; i++) {
+    // Obtem o i-ésimo valor a ser escrito em registradores
+    valor_informado[i] = receivedData[(2*i) + 13]; // MSB
+    valor_informado[i] <<= 8;
+    valor_informado[i] += receivedData[(2*i) + 14] & 0xff; // LSB
+
+    // Caso o valor a ser alterado seja maior que o permitido, levanta a excessão
+    if (valor_informado[i] > 1023) {
+      return 4;
+    }
+  }
+
+  // Escreve os valores nos registradores
+  for (uint8_t i = 0; i < quantidade_registradores; i++) {
+    escreveRegistrador(endereco_inicial + i, valor_informado[i]);
+  }
+
+  // Criando e enviando resposta de confirmação
+  resposta[7] = 0x10;
+  resposta[8] = receivedData[8];
+  resposta[9] = receivedData[9];
+  resposta[10] = receivedData[10];
+  resposta[11] = receivedData[11];
+  qtd_bytes_resposta=12;
+  return 0;
+}
+
+// Função que escreve o valor informado em "valor" no registrador identificado por "endereco"
+void escreveRegistrador(uint16_t endereco, uint16_t valor) {
+  uint16_t indice = endereco - 16;
+  registradores[indice] = valor;
 }
