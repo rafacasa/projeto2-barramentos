@@ -1,5 +1,5 @@
 #include <Arduino.h>
-
+#include <WiFi.h>
 #include <TM1638plus.h> // Biblioteca de manipulação do módulo de display
 
 // Pinos utilizados pelo 74HC595 - Leds
@@ -15,6 +15,10 @@
 // Pinos utilizados pelos botões seletores de endereço
 // #define ENDERECO_PIN_DEZ 33
 // #define ENDERECO_PIN_UN 32
+
+// Constantes com as informações de conexao wifi
+const char* SSID = "FamiliaCasa";
+const char* WIFI_PASSWORD = "";
 
 // Constantes utilizadas pelo módulo TM1638
 const bool HIGH_FREQ_TM = true; // Configuração de alta frequência - verdadeiro para Esp
@@ -33,6 +37,7 @@ uint8_t botoes; // Cada bit representa o estado de um botão do módulo TM1638
 uint8_t reg_exibido_1, reg_exibido_2; // Guarda os registradores sendo exibidos no momento
 // uint8_t endereco_escravo; // Guarda o endereco do escravo, conforme lido pelos botoes
 
+WiFiServer modbus_server(502);
 
 // put function declarations here:
 bool lerBotoes();
@@ -42,6 +47,9 @@ void atualizaRegistradoresExbidos();
 
 
 void setup() {
+  //Inicializa a serial para debug
+  Serial.begin(115200);
+
   // Inicializa o módulo TM 1638
   tm.displayBegin();
   tm.displayText("88888888");
@@ -84,6 +92,18 @@ void setup() {
   // Inicializa os registradores exibidos
   reg_exibido_1 = 0;
   reg_exibido_2 = 1;
+
+  WiFi.begin(SSID, WIFI_PASSWORD);
+  Serial.println("Conectando a rede...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.println(".");
+  }
+  Serial.println("");
+  Serial.println("Concetado a rede com o endereço IP:");
+  Serial.println(WiFi.localIP());
+
+  modbus_server.begin();
 }
 
 void loop() {
@@ -104,6 +124,20 @@ void loop() {
   //   lerQuadroModbus();
   // }
   
+  char leitura[255];
+  WiFiClient cliente = modbus_server.available();
+  if(cliente) {
+    Serial.println("Conexao estabelecida");
+    while(cliente.connected()) {
+      while(cliente.available() > 0) {
+        uint16_t qtd_bytes = cliente.readBytes(leitura, 255);
+        Serial.println("DADOS RECEBIDOS");
+        Serial.write(leitura, 255);
+      }
+    }
+    cliente.stop();
+    Serial.println("FIM DA CONEXAO");
+  }
 }
 
 
