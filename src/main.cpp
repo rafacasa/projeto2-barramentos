@@ -172,7 +172,7 @@ void setup() {
     Serial.println(".");
   }
   Serial.println("");
-  Serial.println("Concetado a rede com o endereço IP:");
+  Serial.println("Conectado a rede com o endereço IP:");
   Serial.println(WiFi.localIP());
 
   AsyncServer *server = new AsyncServer(MODBUS_PORT);
