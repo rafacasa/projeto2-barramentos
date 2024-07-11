@@ -55,6 +55,7 @@ uint8_t executaSolicitacao();
 uint8_t executaWriteMultipleRegisters();
 void escreveRegistrador(uint16_t endereco, uint16_t valor);
 
+// Função chamada ao receber dados da conexão TCP
 static void handleData(void *arg, AsyncClient *client, void *data, size_t len) {
   uint16_t qtd_bytes_para_cabecalho;
   bool envia_resposta = false;
@@ -93,18 +94,22 @@ static void handleData(void *arg, AsyncClient *client, void *data, size_t len) {
   }
 }
 
+// Função chamada ao ocorrer erros na conexão TCP
 static void handleError(void *arg, AsyncClient *client, int8_t error) {
 	Serial.printf("\n Erro %s na conexao do cliente %s \n", client->errorToString(error), client->remoteIP().toString().c_str());
 }
 
+// Função chamada quando ocorre a desconexão de um cliente
 static void handleDisconnect(void *arg, AsyncClient *client) {
 	Serial.printf("\n Cliente %s se desconectou \n", client->remoteIP().toString().c_str());
 }
 
+// Função chamada ao ocorrer timeouts na conexão TCP
 static void handleTimeOut(void *arg, AsyncClient *client, uint32_t time) {
 	Serial.printf("\n Cliente sofreu Timeout: %s \n", client->remoteIP().toString().c_str());
 }
 
+// Função chamada quando um novo cliente se conecta na porta TCP
 static void handleNewClient(void *arg, AsyncClient *client) {
 	Serial.printf("\n Cliente conectou ao servidor, ip: %s", client->remoteIP().toString().c_str());
 	// register events
@@ -163,6 +168,7 @@ void setup() {
   reg_exibido_1 = 0;
   reg_exibido_2 = 1;
 
+  // Conexão a rede Wi-FI
   WiFi.begin(SSID, WIFI_PASSWORD);
   Serial.println("Conectando a rede...");
   while (WiFi.status() != WL_CONNECTED) {
@@ -173,6 +179,7 @@ void setup() {
   Serial.println("Conectado a rede com o endereço IP:");
   Serial.println(WiFi.localIP());
 
+  // Início do servidor TCP
   AsyncServer *server = new AsyncServer(MODBUS_PORT);
   server->onClient(&handleNewClient, server);
 	server->begin();
@@ -286,6 +293,7 @@ bool checaValidadeModbus() {
   return false;
 }
 
+// Função que obtem os dados da requisição Modbus e enchaminha para a função desejada
 bool avaliaComandoModbus() {
   uint8_t codigoExcessao;
   // Monta o inicio do cabecalho da resposta
