@@ -66,8 +66,6 @@ static void handleData(void *arg, AsyncClient *client, void *data, size_t len) {
   }
   Serial.println("");
   
-  // COMANDO MODBUS RECEBIDO EM dados
-
   //Verificar MBAP -
     // Protocol ID
     // Unit ID
